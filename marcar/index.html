@@ -18,6 +18,9 @@
   .gps b{display:block} .gps small{color:var(--suave)}
   #mapa{height:300px;border-radius:16px;border:1px solid var(--borde);margin-bottom:14px;background:#d8d2c4}
   .icono-marca{font-size:22px;line-height:1;text-shadow:0 0 3px #fff,0 0 3px #fff}
+  .cruz{font-size:28px;line-height:1;color:#c8643b;text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff;font-weight:700}
+  .elegido{background:#fff4ec;border:1px solid #c8643b;border-radius:12px;padding:10px 12px;margin:-4px 0 14px;font-size:.9rem;display:none;justify-content:space-between;align-items:center;gap:10px}
+  .elegido button{border:0;background:none;color:#b3392f;font:inherit;font-size:.85rem}
   .seguir{position:absolute;right:10px;bottom:10px;z-index:500;background:#fff;border:1px solid var(--borde);border-radius:12px;padding:8px 10px;font:inherit;font-size:.8rem}
   label.zona{display:block;font-size:.9rem;color:var(--suave);margin:0 0 6px}
   select,input{width:100%;font:inherit;padding:12px;border-radius:12px;border:1px solid var(--borde);background:#fff;margin-bottom:14px}
@@ -42,11 +45,13 @@
 <body>
 <main>
   <h1>Marca dónde está</h1>
-  <p class="sub">Párate encima del elemento (o pegado a él), espera el punto verde y toca su ícono. Nada más.</p>
+  <p class="sub">Párate junto al elemento, espera el punto verde y toca su ícono.<br><b>¿Lo ves en la foto?</b> Toca el mapa donde está y luego su ícono, sin salir de casa.</p>
 
   <div class="gps" id="gps"><div class="punto"></div><div><b id="gpsTitulo">Buscando tu ubicación…</b><small id="gpsDetalle">Acepta el permiso de ubicación cuando el celular lo pida.</small></div></div>
 
   <div style="position:relative"><div id="mapa"></div><button class="seguir" id="centrar" type="button">📍 Centrar en mí</button></div>
+
+  <div class="elegido" id="elegido"><span>✛ Punto elegido en el mapa: ahora toca el ícono de lo que es.</span><button id="quitarPunto" type="button">Quitar</button></div>
 
   <label class="zona" for="zona">¿Dónde estás?</label>
   <select id="zona">
@@ -117,11 +122,21 @@ function pintarYo(){
     mapa.setView(ll,19);
   } else { yo.setLatLng(ll); margen.setLatLng(ll).setRadius(pos.coords.accuracy); if(seguir) mapa.panTo(ll); }
 }
+// Marcar desde el mapa: tocar el lugar deja una cruz; el siguiente ícono se guarda ahí.
+let elegido=null, cruz=null;
+mapa.on("click",e=>{
+  elegido=e.latlng;
+  if(!cruz) cruz=L.marker(elegido,{icon:L.divIcon({className:"cruz",html:"✛",iconSize:[28,28],iconAnchor:[14,14]})}).addTo(mapa);
+  else cruz.setLatLng(elegido);
+  $("elegido").style.display="flex";
+});
+function quitarElegido(){ elegido=null; if(cruz){ mapa.removeLayer(cruz); cruz=null; } $("elegido").style.display="none"; }
+$("quitarPunto").addEventListener("click",quitarElegido);
 function pintarMarcas(){
   capaMarcas.clearLayers();
   for(const x of marcas){
     L.marker([x.lat,x.lon],{icon:L.divIcon({className:"icono-marca",html:x.icono,iconSize:[24,24],iconAnchor:[12,12]})})
-      .bindPopup(x.nombre+"<br>"+x.zona+(x.casa?" · casa "+x.casa:"")+"<br>±"+x.precision_m+" m").addTo(capaMarcas);
+      .bindPopup(x.nombre+"<br>"+x.zona+(x.casa?" · casa "+x.casa:"")+"<br>"+(x.precision_m==="mapa"?"marcado desde el mapa":"±"+x.precision_m+" m")).addTo(capaMarcas);
   }
 }
 
@@ -145,12 +160,18 @@ for(const [tipo,icono,nombre] of TIPOS){
 }
 
 function marcar(tipo,icono,nombre){
-  if(!pos){ aviso("Espera a que aparezca tu ubicación"); return; }
-  const m=Math.round(pos.coords.accuracy);
-  if(m>REGULAR){ aviso("El GPS aún tiene "+m+" m de error. Espera un poco."); return; }
   const casa=$("casa").value.trim();
-  marcas.push({ tipo, icono, nombre, zona:$("zona").value, casa: $("zona").value==="Frente de casa" && casa ? Number(casa) : null,
-    lat:+pos.coords.latitude.toFixed(7), lon:+pos.coords.longitude.toFixed(7), precision_m:m, hora:new Date().toISOString() });
+  const base={ tipo, icono, nombre, zona:$("zona").value, casa: $("zona").value==="Frente de casa" && casa ? Number(casa) : null, hora:new Date().toISOString() };
+  if(elegido){
+    // Desde el mapa: la precisión es la de la foto satelital, no la del GPS.
+    marcas.push({ ...base, lat:+elegido.lat.toFixed(7), lon:+elegido.lng.toFixed(7), precision_m:"mapa" });
+    quitarElegido(); guardar(); pintar(); if(navigator.vibrate) navigator.vibrate(60);
+    aviso(icono+" "+nombre+" marcado en el mapa"); return;
+  }
+  if(!pos){ aviso("Toca el mapa donde está, o espera tu ubicación"); return; }
+  const m=Math.round(pos.coords.accuracy);
+  if(m>REGULAR){ aviso("El GPS aún tiene "+m+" m de error. Espera, o toca el mapa donde está."); return; }
+  marcas.push({ ...base, lat:+pos.coords.latitude.toFixed(7), lon:+pos.coords.longitude.toFixed(7), precision_m:m });
   guardar(); pintar(); if(navigator.vibrate) navigator.vibrate(60);
   aviso(icono+" "+nombre+" marcado ("+m+" m)");
 }
@@ -161,7 +182,7 @@ function pintar(){
   marcas.slice().reverse().forEach((x,iInv)=>{
     const i=marcas.length-1-iInv;
     const li=document.createElement("li");
-    li.innerHTML='<span class="ic">'+x.icono+'</span><span class="tx">'+x.nombre+'<small>'+x.zona+(x.casa?" · casa "+x.casa:"")+' · ±'+x.precision_m+' m · '+new Date(x.hora).toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"})+'</small></span>';
+    li.innerHTML='<span class="ic">'+x.icono+'</span><span class="tx">'+x.nombre+'<small>'+x.zona+(x.casa?" · casa "+x.casa:"")+' · '+(x.precision_m==="mapa"?"desde el mapa":"±"+x.precision_m+" m")+' · '+new Date(x.hora).toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"})+'</small></span>';
     const del=document.createElement("button"); del.textContent="Borrar"; del.addEventListener("click",()=>{ marcas.splice(i,1); guardar(); pintar(); });
     li.appendChild(del); ul.appendChild(li);
   });
