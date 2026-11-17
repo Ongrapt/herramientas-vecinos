@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Marca dónde está</title>
+<style>
+  :root{--fondo:#f6f2ea;--tinta:#2a2119;--suave:#7a6f60;--borde:#e3dccf;--acento:#c8643b;--ok:#2f7d4f;--mal:#b3392f}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--fondo);color:var(--tinta)}
+  main{max-width:520px;margin:auto;padding:16px 14px 120px}
+  h1{font-size:1.35rem;margin:6px 0 2px}
+  .sub{color:var(--suave);margin:0 0 14px;font-size:.95rem;line-height:1.4}
+  .gps{background:#fff;border:1px solid var(--borde);border-radius:16px;padding:12px 14px;margin-bottom:14px;display:flex;align-items:center;gap:10px}
+  .punto{width:14px;height:14px;border-radius:50%;background:#bbb;flex:none}
+  .gps.bien .punto{background:var(--ok)} .gps.regular .punto{background:#e0a32e} .gps.mal .punto{background:var(--mal)}
+  .gps b{display:block} .gps small{color:var(--suave)}
+  label.zona{display:block;font-size:.9rem;color:var(--suave);margin:0 0 6px}
+  select,input{width:100%;font:inherit;padding:12px;border-radius:12px;border:1px solid var(--borde);background:#fff;margin-bottom:14px}
+  .rejilla{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .boton{border:1px solid var(--borde);background:#fff;border-radius:16px;padding:14px 6px;font:inherit;font-size:.85rem;color:var(--tinta);display:flex;flex-direction:column;align-items:center;gap:6px;min-height:92px;cursor:pointer}
+  .boton span{font-size:2rem;line-height:1}
+  .boton:active{transform:scale(.97);background:#fbf6ee}
+  .boton:disabled{opacity:.45}
+  .aviso{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);background:var(--tinta);color:#fff;padding:12px 18px;border-radius:14px;font-size:.95rem;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90%;text-align:center}
+  .aviso.ver{opacity:1}
+  h2{font-size:1rem;margin:22px 0 8px}
+  ul{list-style:none;padding:0;margin:0}
+  li{background:#fff;border:1px solid var(--borde);border-radius:12px;padding:10px 12px;margin-bottom:8px;display:flex;gap:10px;align-items:center}
+  li .ic{font-size:1.4rem} li .tx{flex:1;font-size:.9rem} li .tx small{color:var(--suave);display:block}
+  li button{border:0;background:none;color:var(--mal);font:inherit;font-size:.85rem;padding:6px}
+  .vacio{color:var(--suave);font-size:.9rem}
+  .barra{position:fixed;left:0;right:0;bottom:0;background:#fffdf9;border-top:1px solid var(--borde);padding:12px 14px calc(12px + env(safe-area-inset-bottom));display:flex;gap:10px;justify-content:center}
+  .barra button,.barra a{flex:1;max-width:250px;border-radius:14px;border:0;padding:14px;font:inherit;font-weight:600;text-align:center;text-decoration:none}
+  .principal{background:var(--acento);color:#fff} .secundario{background:#ece5d8;color:var(--tinta)}
+</style>
+</head>
+<body>
+<main>
+  <h1>Marca dónde está</h1>
+  <p class="sub">Párate encima del elemento (o pegado a él), espera el punto verde y toca su ícono. Nada más.</p>
+
+  <div class="gps" id="gps"><div class="punto"></div><div><b id="gpsTitulo">Buscando tu ubicación…</b><small id="gpsDetalle">Acepta el permiso de ubicación cuando el celular lo pida.</small></div></div>
+
+  <label class="zona" for="zona">¿Dónde estás?</label>
+  <select id="zona">
+    <option>Parque 1 · Cinema</option>
+    <option>Parque 2 · Cluster 2</option>
+    <option>Parque 3 · Canchas y asador</option>
+    <option>Parque 4 · Pádel</option>
+    <option>Avenida principal</option>
+    <option>Frente de casa</option>
+    <option>Otro lugar</option>
+  </select>
+  <input id="casa" type="number" inputmode="numeric" placeholder="Número de casa (opcional)" style="display:none">
+
+  <div class="rejilla" id="botones"></div>
+
+  <h2>Marcados (<span id="cuantos">0</span>)</h2>
+  <ul id="lista"></ul>
+  <p class="vacio" id="vacio">Todavía no marcas nada.</p>
+</main>
+
+<div class="aviso" id="aviso"></div>
+
+<div class="barra">
+  <a class="principal" id="whatsapp" href="#">Enviar por WhatsApp</a>
+  <button class="secundario" id="copiar" type="button">Copiar</button>
+</div>
+
+
+<script>
+const TIPOS = [
+  ["poste","💡","Mini poste"],["poste_luz","🏮","Poste de luz"],["transformador","🔌","Transformador"],
+  ["arbol","🌳","Árbol"],["alcantarilla","🕳️","Alcantarilla"],["registro_cfe","⚡","Registro CFE"],
+  ["tapa_registro","🔲","Tapa de registro"],["lampara_piso","🔆","Lámpara de piso"],["lampara","🔅","Lámpara"],
+  ["camara","📹","Cámara"],["senalamiento","🛑","Señal"],["aspersor","💦","Aspersor"],
+  ["juego","🛝","Juego infantil"],["bote_basura","🗑️","Bote de basura"],["otro","📍","Otra cosa"]
+];
+const BUENA = 8, REGULAR = 20; // metros
+let pos = null, marcas = [];
+const $ = id => document.getElementById(id);
+try { marcas = JSON.parse(localStorage.getItem("marcas") || "[]"); } catch { marcas = []; }
+const guardar = () => { try { localStorage.setItem("marcas", JSON.stringify(marcas)); } catch {} };
+
+function aviso(t){ const a=$("aviso"); a.textContent=t; a.classList.add("ver"); clearTimeout(a._t); a._t=setTimeout(()=>a.classList.remove("ver"),2200); }
+
+function pintarGps(){
+  const g=$("gps"); g.className="gps";
+  if(!pos){ return; }
+  const m=Math.round(pos.coords.accuracy);
+  if(m<=BUENA){ g.classList.add("bien"); $("gpsTitulo").textContent="Listo: precisión de "+m+" m"; $("gpsDetalle").textContent="Ya puedes marcar."; }
+  else if(m<=REGULAR){ g.classList.add("regular"); $("gpsTitulo").textContent="Casi: precisión de "+m+" m"; $("gpsDetalle").textContent="Espera unos segundos al aire libre, lejos de techos."; }
+  else { g.classList.add("mal"); $("gpsTitulo").textContent="Todavía impreciso: "+m+" m"; $("gpsDetalle").textContent="Sal al aire libre y espera a que baje de "+REGULAR+" m."; }
+}
+
+if(!("geolocation" in navigator)){
+  $("gpsTitulo").textContent="Este celular no da la ubicación"; $("gps").classList.add("mal");
+} else {
+  navigator.geolocation.watchPosition(p=>{ pos=p; pintarGps(); }, e=>{
+    $("gps").className="gps mal";
+    $("gpsTitulo").textContent = e.code===1 ? "Sin permiso de ubicación" : "No se pudo leer la ubicación";
+    $("gpsDetalle").textContent = e.code===1 ? "Actívalo en el candado de la barra de direcciones y recarga la página." : "Revisa que el GPS del celular esté encendido.";
+  }, { enableHighAccuracy:true, maximumAge:0, timeout:30000 });
+}
+
+$("zona").addEventListener("change",()=>{ $("casa").style.display = $("zona").value==="Frente de casa" ? "block" : "none"; });
+
+for(const [tipo,icono,nombre] of TIPOS){
+  const b=document.createElement("button"); b.className="boton"; b.type="button";
+  b.innerHTML="<span>"+icono+"</span>"+nombre;
+  b.addEventListener("click",()=>marcar(tipo,icono,nombre));
+  $("botones").appendChild(b);
+}
+
+function marcar(tipo,icono,nombre){
+  if(!pos){ aviso("Espera a que aparezca tu ubicación"); return; }
+  const m=Math.round(pos.coords.accuracy);
+  if(m>REGULAR){ aviso("El GPS aún tiene "+m+" m de error. Espera un poco."); return; }
+  const casa=$("casa").value.trim();
+  marcas.push({ tipo, icono, nombre, zona:$("zona").value, casa: $("zona").value==="Frente de casa" && casa ? Number(casa) : null,
+    lat:+pos.coords.latitude.toFixed(7), lon:+pos.coords.longitude.toFixed(7), precision_m:m, hora:new Date().toISOString() });
+  guardar(); pintar(); if(navigator.vibrate) navigator.vibrate(60);
+  aviso(icono+" "+nombre+" marcado ("+m+" m)");
+}
+
+function pintar(){
+  $("cuantos").textContent=marcas.length; $("vacio").style.display=marcas.length?"none":"block";
+  const ul=$("lista"); ul.innerHTML="";
+  marcas.slice().reverse().forEach((x,iInv)=>{
+    const i=marcas.length-1-iInv;
+    const li=document.createElement("li");
+    li.innerHTML='<span class="ic">'+x.icono+'</span><span class="tx">'+x.nombre+'<small>'+x.zona+(x.casa?" · casa "+x.casa:"")+' · ±'+x.precision_m+' m · '+new Date(x.hora).toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"})+'</small></span>';
+    const del=document.createElement("button"); del.textContent="Borrar"; del.addEventListener("click",()=>{ marcas.splice(i,1); guardar(); pintar(); });
+    li.appendChild(del); ul.appendChild(li);
+  });
+  const texto = encodeURIComponent(textoLista());
+  $("whatsapp").href = "https://wa.me/?text=" + texto;
+}
+
+function textoLista(){
+  const cuenta={}; marcas.forEach(x=>cuenta[x.nombre]=(cuenta[x.nombre]||0)+1);
+  const resumen=Object.entries(cuenta).map(([n,c])=>c+" "+n).join(", ");
+  const filas=marcas.map(x=>[x.tipo,x.zona,x.casa??"",x.lat,x.lon,x.precision_m,x.hora].join(";"));
+  return "Marcas de ubicación ("+marcas.length+"): "+resumen+"\n\ntipo;zona;casa;lat;lon;precision_m;hora\n"+filas.join("\n");
+}
+
+$("whatsapp").addEventListener("click",e=>{ if(!marcas.length){ e.preventDefault(); aviso("Primero marca algo"); } });
+$("copiar").addEventListener("click",async()=>{
+  if(!marcas.length){ aviso("Primero marca algo"); return; }
+  try{ await navigator.clipboard.writeText(textoLista()); aviso("Copiado. Pégalo en WhatsApp o correo."); }
+  catch{ aviso("No se pudo copiar; usa Enviar por WhatsApp"); }
+});
+pintar();
+</script>
+</body>
+</html>
