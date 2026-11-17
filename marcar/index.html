@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Marca dónde está</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
   :root{--fondo:#f6f2ea;--tinta:#2a2119;--suave:#7a6f60;--borde:#e3dccf;--acento:#c8643b;--ok:#2f7d4f;--mal:#b3392f}
   *{box-sizing:border-box}
@@ -15,6 +16,9 @@
   .punto{width:14px;height:14px;border-radius:50%;background:#bbb;flex:none}
   .gps.bien .punto{background:var(--ok)} .gps.regular .punto{background:#e0a32e} .gps.mal .punto{background:var(--mal)}
   .gps b{display:block} .gps small{color:var(--suave)}
+  #mapa{height:300px;border-radius:16px;border:1px solid var(--borde);margin-bottom:14px;background:#d8d2c4}
+  .icono-marca{font-size:22px;line-height:1;text-shadow:0 0 3px #fff,0 0 3px #fff}
+  .seguir{position:absolute;right:10px;bottom:10px;z-index:500;background:#fff;border:1px solid var(--borde);border-radius:12px;padding:8px 10px;font:inherit;font-size:.8rem}
   label.zona{display:block;font-size:.9rem;color:var(--suave);margin:0 0 6px}
   select,input{width:100%;font:inherit;padding:12px;border-radius:12px;border:1px solid var(--borde);background:#fff;margin-bottom:14px}
   .rejilla{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
@@ -41,6 +45,8 @@
   <p class="sub">Párate encima del elemento (o pegado a él), espera el punto verde y toca su ícono. Nada más.</p>
 
   <div class="gps" id="gps"><div class="punto"></div><div><b id="gpsTitulo">Buscando tu ubicación…</b><small id="gpsDetalle">Acepta el permiso de ubicación cuando el celular lo pida.</small></div></div>
+
+  <div style="position:relative"><div id="mapa"></div><button class="seguir" id="centrar" type="button">📍 Centrar en mí</button></div>
 
   <label class="zona" for="zona">¿Dónde estás?</label>
   <select id="zona">
@@ -69,6 +75,7 @@
 </div>
 
 
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 const TIPOS = [
   ["poste","💡","Mini poste"],["poste_luz","🏮","Poste de luz"],["transformador","🔌","Transformador"],
@@ -94,10 +101,34 @@ function pintarGps(){
   else { g.classList.add("mal"); $("gpsTitulo").textContent="Todavía impreciso: "+m+" m"; $("gpsDetalle").textContent="Sal al aire libre y espera a que baje de "+REGULAR+" m."; }
 }
 
+// Mapa: foto satelital, tu punto (azul, con su margen de error) y las marcas.
+const mapa = L.map("mapa",{zoomControl:true,attributionControl:true}).setView([21.0665,-89.5310],17);
+L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{maxZoom:20,maxNativeZoom:19,attribution:"Imagen © Esri"}).addTo(mapa);
+const capaMarcas = L.layerGroup().addTo(mapa);
+let yo=null, margen=null, seguir=true;
+mapa.on("dragstart",()=>{ seguir=false; });
+$("centrar").addEventListener("click",()=>{ seguir=true; if(pos) mapa.setView([pos.coords.latitude,pos.coords.longitude],19); });
+function pintarYo(){
+  if(!pos) return;
+  const ll=[pos.coords.latitude,pos.coords.longitude];
+  if(!yo){
+    margen=L.circle(ll,{radius:pos.coords.accuracy,color:"#2f6fb5",weight:1,fillOpacity:.12}).addTo(mapa);
+    yo=L.circleMarker(ll,{radius:8,color:"#fff",weight:3,fillColor:"#2f6fb5",fillOpacity:1}).addTo(mapa);
+    mapa.setView(ll,19);
+  } else { yo.setLatLng(ll); margen.setLatLng(ll).setRadius(pos.coords.accuracy); if(seguir) mapa.panTo(ll); }
+}
+function pintarMarcas(){
+  capaMarcas.clearLayers();
+  for(const x of marcas){
+    L.marker([x.lat,x.lon],{icon:L.divIcon({className:"icono-marca",html:x.icono,iconSize:[24,24],iconAnchor:[12,12]})})
+      .bindPopup(x.nombre+"<br>"+x.zona+(x.casa?" · casa "+x.casa:"")+"<br>±"+x.precision_m+" m").addTo(capaMarcas);
+  }
+}
+
 if(!("geolocation" in navigator)){
   $("gpsTitulo").textContent="Este celular no da la ubicación"; $("gps").classList.add("mal");
 } else {
-  navigator.geolocation.watchPosition(p=>{ pos=p; pintarGps(); }, e=>{
+  navigator.geolocation.watchPosition(p=>{ pos=p; pintarGps(); pintarYo(); }, e=>{
     $("gps").className="gps mal";
     $("gpsTitulo").textContent = e.code===1 ? "Sin permiso de ubicación" : "No se pudo leer la ubicación";
     $("gpsDetalle").textContent = e.code===1 ? "Actívalo en el candado de la barra de direcciones y recarga la página." : "Revisa que el GPS del celular esté encendido.";
@@ -134,6 +165,7 @@ function pintar(){
     const del=document.createElement("button"); del.textContent="Borrar"; del.addEventListener("click",()=>{ marcas.splice(i,1); guardar(); pintar(); });
     li.appendChild(del); ul.appendChild(li);
   });
+  pintarMarcas();
   const texto = encodeURIComponent(textoLista());
   $("whatsapp").href = "https://wa.me/?text=" + texto;
 }
